@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+envs/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Experiment outputs & models (large / local paths)
+exp
+pretrained_models
+logs/
+cache/
+slurm/
+sample/
+
+# Data (audio features, shar shards, cuts; often symlinked)
+data/
+cuts/
+
+# Checkpoints & tensors
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.onnx
+*.safetensors
+
+# Temporary / local tooling
+.claude/
+*.log
+tmp/
+temp/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/

@@ -1,0 +1,118 @@
+{
+    "data": {
+        "train_shar_dirs": "data/fbank/speechllm_yodas/shar/en_asr",
+        "shard_assignment_file": "data/shar/en_asr_shard_assignment_ws8.json",
+        "valid_dataset": [
+            "data/cuts/dev/granary_yodas_en_sft_dev_repacked.jsonl"
+        ],
+        "concatenate_cuts": false,
+        "enable_musan": false,
+        "noise_cut_paths": [
+            "data/fbank/musan_cuts.jsonl.gz",
+            "data/fbank/noise/noise_tmk_01/noise_tmk_01.jsonl.gz",
+            "data/fbank/noise/noise_tmk_02_20250904/noise_tmk_02_20250904.jsonl.gz",
+            "/nfs/asr/tkasr/es/data/noise/tmk03_cuts.jsonl.gz"
+        ],
+        "add_noise_prob": 0.5,
+        "snr_min": 10,
+        "snr_max": 20,
+        "enable_spec_aug": true,
+        "spec_aug_time_warp_factor": 0,
+        "spec_aug_num_feature_masks": 2,
+        "spec_aug_features_mask_size": 18,
+        "spec_aug_num_frame_masks": 2,
+        "spec_aug_frames_mask_size": 50,
+        "max_duration": 350.0,
+        "max_batch_size": 70,
+        "num_buckets": 60,
+        "lazy_load": true,
+        "pad_last_chunk": true,
+        "pad_chunk_size": 32,
+        "sampler_type": "stateless_sampler",
+        "mask_lang_prob": 0.5,
+        "start_current_time": 0.025,
+        "overlap_ratio": 0.9,
+        "overlap_threshold": 0.02,
+        "decode_chunks": {
+            "1": 0.3,
+            "2": 0.3,
+            "4": 0.3,
+            "-1": 0.2
+        },
+        "ast_decode_chunks": {
+            "1": 0.3,
+            "2": 0.3,
+            "4": 0.3,
+            "-1": 0.2
+        }
+    },
+    "model": {
+        "zipformer": {
+            "feature_dim": 80,
+            "encoder_dim": "192,256,512,768,512,256",
+            "num_encoder_layers": "2,2,4,5,4,2",
+            "downsampling_factor": "1,2,4,8,4,2",
+            "feedforward_dim": "512,768,1536,2048,1536,768",
+            "num_heads": "4,4,4,8,4,4",
+            "encoder_unmasked_dim": "192,192,256,320,256,192",
+            "query_head_dim": 32,
+            "pos_head_dim": 4,
+            "value_head_dim": 12,
+            "pos_dim": 48,
+            "cnn_module_kernel": "31,31,15,15,15,31",
+            "path": "/nfs/guokezhen/SpeechLLM/pretrained_models/Zipformer/multilingual_step_1080000.pt",
+            "finetune": false,
+            "chunk_size": 16,
+            "left_context_frames": 128,
+            "causal": true
+        },
+        "adapter": {
+            "name": "pooling-adapter",
+            "input_dim": 768,
+            "hidden_dim": 2048,
+            "llm_dim": 1024,
+            "num_layers": 2,
+            "pooling": "cat",
+            "pooling_factor": 4,
+            "finetune": true,
+            "dropout": 0.1
+        },
+        "llm": {
+            "model_name": "/nfs/guokezhen/SpeechLLM/pretrained_models/Qwen3-0.6B",
+            "enable_lora": false,
+            "finetune": true,
+            "gradient_checkpointing": true,
+            "enable_dropout": true,
+            "dropout_rate": 0.05
+        }
+    },
+    "train": {
+        "exp_dir": "exp",
+        "exp_name": "sft_ast_stage2",
+        "checkpoint_dir_name": "checkpoints",
+        "seed": 42,
+        "gpus": 8,
+        "grad_accumulate_steps": 1,
+        "lr_connector": 2e-4,
+        "finetune_special_tokens": true,
+        "lr_llm": 2e-5,
+        "lr_special_tokens": 2e-5,
+        "weight_decay": 0.1,
+        "weight_decay_connector": 0.01,
+        "weight_decay_special_tokens": 0.0,
+        "max_steps": 400000,
+        "scheduler": {
+            "name": "step_cosine",
+            "warmup_steps": 1000,
+            "min_lr_ratio": 0.05
+        },
+        "max_token_length": null,
+        "val_interval": 4000,
+        "save_interval": 20000,
+        "log_interval": 100,
+        "dataloader_num_workers": 10,
+        "val_decode_chunk": 1,
+        "ast_val_decode_chunk": 4,
+        "prefetch_factor": 8
+    }
+}
