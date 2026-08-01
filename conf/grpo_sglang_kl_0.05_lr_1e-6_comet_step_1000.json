@@ -1,0 +1,119 @@
+{
+    "data": {
+        "train_shar_dirs": "data/fbank/speechllm_yodas/shar/en2zh_grpo",
+        "shard_assignment_file": "data/shar/en2zh_grpo_shard_assignment_ws6.json",
+        "valid_dataset": [
+            "data/cuts/dev/granary_yodas_en2zh_grpo_dev_repacked.jsonl"
+        ],
+        "concatenate_cuts": false,
+        "enable_musan": false,
+        "enable_spec_aug": false,
+        "max_duration": 80,
+        "max_batch_size": 8,
+        "num_buckets": 30,
+        "lazy_load": true,
+        "pad_last_chunk": true,
+        "pad_chunk_size": 32,
+        "sampler_type": "shar_pool_sampler",
+        "mask_lang_prob": 0.5,
+        "start_current_time": 0.025,
+        "overlap_ratio": 0.9,
+        "overlap_threshold": 0.02,
+        "decode_chunks": {
+            "1": 0.3,
+            "2": 0.3,
+            "4": 0.3
+        },
+        "ast_decode_chunks": {
+            "1": 0.3,
+            "2": 0.3,
+            "4": 0.3
+        }
+    },
+    "model": {
+        "zipformer": {
+            "feature_dim": 80,
+            "encoder_dim": "192,256,384,512,384,256",
+            "num_encoder_layers": "2,2,3,4,3,2",
+            "downsampling_factor": "1,2,4,8,4,2",
+            "feedforward_dim": "512,768,1024,1536,1024,768",
+            "num_heads": "4,4,4,8,4,4",
+            "encoder_unmasked_dim": "192,192,256,256,256,192",
+            "query_head_dim": 32,
+            "pos_head_dim": 4,
+            "value_head_dim": 12,
+            "pos_dim": 48,
+            "cnn_module_kernel": "31,31,15,15,15,31",
+            "path": "pretrained_models/zipformer_base_en/iter-210000-avg-6.pt",
+            "finetune": false,
+            "chunk_size": 16,
+            "left_context_frames": 128,
+            "causal": true
+        },
+        "adapter": {
+            "name": "pooling-adapter",
+            "input_dim": 512,
+            "hidden_dim": 2048,
+            "llm_dim": 1024,
+            "num_layers": 2,
+            "pooling": "cat",
+            "pooling_factor": 4,
+            "finetune": false,
+            "dropout": 0.0
+        },
+        "llm": {
+            "model_name": "pretrained_models/Qwen3-0.6B",
+            "enable_lora": false,
+            "finetune": true,
+            "gradient_checkpointing": true,
+            "enable_dropout": true,
+            "dropout_rate": 0.0
+        }
+    },
+    "train": {
+        "exp_dir": "exp",
+        "exp_name": "grpo_sglang_kl_0.05_lr_1e-6_comet",
+        "checkpoint_dir_name": "checkpoints",
+        "seed": 42,
+        "gpus": 6,
+        "grad_accumulate_steps": 1,
+        "finetune_special_tokens": true,
+        "lr_llm": 1e-6,
+        "lr_special_tokens": 1e-6,
+        "weight_decay": 0.0,
+        "weight_decay_special_tokens": 0.0,
+        "max_steps": 1000,
+        "scheduler": {
+            "name": "step_cosine",
+            "warmup_steps": 20,
+            "min_lr_ratio": 0.5
+        },
+        "max_token_length": 320,
+        "val_interval": 50,
+        "save_interval": 200,
+        "log_interval": 1,
+        "dataloader_num_workers": 1,
+        "val_decode_chunk": 1,
+        "ast_val_decode_chunk": 1,
+        "group_size": 4,
+        "clip_eps": 0.2,
+        "kl_coef": 0.05,
+        "alpha": 0.5,
+        "comet_model_path": "pretrained_models/wmt22-comet-da/checkpoints/model.ckpt",
+        "comet_gpus": 1,
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "max_new_tokens": 64,
+        "repetition_penalty": 1.0,
+        "bleu_weights": [0.25, 0.25, 0.25, 0.25],
+        "sglang_base_port": 30000,
+        "sglang_num_instances": 2,
+        "sglang_server_url": "http://127.0.0.1:30000",
+        "sglang_sync_interval": 16,
+        "sglang_weight_sync_path": "/dev/shm/sglang_sync_weights",
+        "use_shm_proxy": true,
+        "shm_proxy_port_offset": 31000,
+        "old_policy_sync_interval": 0,
+        "ref_model_sync_interval": 16
+    }
+}

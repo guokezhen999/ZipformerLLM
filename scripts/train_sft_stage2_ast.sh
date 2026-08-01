@@ -32,7 +32,7 @@ ckpt_path="exp/sft_stage2_ast_step_100k/checkpoints/epoch-epoch=13-step-step=908
 
 # --pretrained_model_path "$pretrained_model" \
 
-srun python speechllm/bin/train_sft.py \
+srun python speechllm/train/train_sft.py \
     --train_type streaming_ast \
     --config $config \
     --ckpt_path "$ckpt_path"

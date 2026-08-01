@@ -28,4 +28,4 @@ ulimit -n 65536
 
 config="conf/sft_stage1_asr.json"
 
-srun python speechllm/bin/train_sft.py --train_type streaming_asr --config $config
+srun python speechllm/train/train_sft.py --train_type streaming_asr --config $config

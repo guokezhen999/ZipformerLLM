@@ -2,9 +2,9 @@
 """Convert Lightning DeepSpeed ZeRO checkpoints to a single fp32 .pt file.
 
 Usage:
-  python speechllm/bin/convert_deepspeed_ckpt.py /path/to/step-xxx.ckpt
-  python speechllm/bin/convert_deepspeed_ckpt.py /path/to/step-xxx.ckpt -o /path/to/out.pt
-  python speechllm/bin/convert_deepspeed_ckpt.py /path/to/checkpoints --all
+  python speechllm/eval/convert_ds_ckpt.py /path/to/step-xxx.ckpt
+  python speechllm/eval/convert_ds_ckpt.py /path/to/step-xxx.ckpt -o /path/to/out.pt
+  python speechllm/eval/convert_ds_ckpt.py /path/to/checkpoints --all
 """
 
 from __future__ import annotations
