@@ -161,6 +161,11 @@ class DatasetForStreamAST(DatasetStream):
         else:
             flat_alignments = self._extract_flat_alignments(sorted_sups, time_offset=time_offset)
 
+        # COMET 需要源语言转写；取第一条 supervision 的 ASR text
+        source_text = ""
+        if sorted_sups and hasattr(sorted_sups[0], "text") and sorted_sups[0].text:
+            source_text = sorted_sups[0].text
+
         cut_segments = []
         current_time = self.start_current_time
         audio_duration = cut.duration + time_offset
@@ -189,6 +194,7 @@ class DatasetForStreamAST(DatasetStream):
                 "text": self._format_text(segment_words),
                 "start_idx": start_idx,
                 "end_idx": end_idx,
+                "source_text": source_text,
             })
 
             current_time = segment_end_time

@@ -97,6 +97,7 @@ class SpeechLLMLightningASTGRPOVLLM(SpeechLLMLightningASTGRPO):
         self._resume_global_step = 0
         if not self.finetune_encoder:
             self.audio_encoder.eval()
+        self._warmup_comet_if_needed()
         # 确保 vLLM 初始权重目录存在
         self._save_llm_weights_for_vllm(self.vllm_weight_sync_path)
 
@@ -462,14 +463,43 @@ class SpeechLLMLightningASTGRPOVLLM(SpeechLLMLightningASTGRPO):
                     f"per_g={[f'{r:.3f}' for r in group_rewards]}"
                 )
 
-        self.log_dict({
+        avg_group_reward = sum(group_mean_rewards) / max(len(group_mean_rewards), 1)
+        avg_group_var = sum(group_var_rewards) / max(len(group_var_rewards), 1)
+
+        local_bleu_means = getattr(self, "_last_local_bleu_means", None)
+        global_rewards = getattr(self, "_last_global_rewards", None)
+        avg_local_bleu = (
+            sum(local_bleu_means) / max(len(local_bleu_means), 1)
+            if local_bleu_means else 0.0
+        )
+        avg_global_reward = (
+            sum(global_rewards) / max(len(global_rewards), 1)
+            if global_rewards else 0.0
+        )
+
+        log_dict = {
             "rl/policy_loss": policy_loss,
             "rl/kl_loss": kl_loss,
             "rl/total_loss": total_loss,
             "rl/mean_advantage": mean_adv,
-            "rl/group_mean_reward": sum(group_mean_rewards) / max(len(group_mean_rewards), 1),
-            "rl/group_reward_var": sum(group_var_rewards) / max(len(group_var_rewards), 1),
-        }, prog_bar=True)
+            "rl/group_mean_reward": avg_group_reward,
+            "rl/group_reward_var": avg_group_var,
+            "rl/local_bleu_mean": avg_local_bleu,
+            "rl/global_reward_mean": avg_global_reward,
+        }
+        if self.use_comet:
+            comet_scores = getattr(self, "_last_comet_scores", None)
+            if comet_scores:
+                log_dict["rl/comet_global_mean"] = sum(comet_scores) / len(comet_scores)
+        self.log_dict(log_dict, prog_bar=True)
+
+        global_label = "COMET" if self.use_comet else "BLEU"
+        logging.warning(
+            f"[GRPO-Reward] batch={batch_idx} "
+            f"avg_local_bleu={avg_local_bleu:.4f} "
+            f"avg_global_{global_label.lower()}={avg_global_reward:.4f} "
+            f"avg_combined={avg_group_reward:.4f}"
+        )
         self.log("total_samples", float(self.total_processed_samples),
                  on_step=True, on_epoch=False, prog_bar=False)
         if self.sampler_type not in ("stateless_sampler", "shuffle_queue_stateless_sampler", "shar_stateless_sampler", "shard_pool_sampler"):
@@ -537,10 +567,10 @@ class SpeechLLMLightningASTGRPOVLLM(SpeechLLMLightningASTGRPO):
                 global_bleu = self.rewarder.compute_global_bleu(gen_chunks, target_chunks)
                 global_rews.append(global_bleu)
 
-        # 批量计算 COMET
-        if self.use_comet and comet_samples:
-            comet_scores = self.rewarder.compute_global_comet_batch(comet_samples)
-            global_rews = list(comet_scores)
+        # 批量计算 COMET（comet_rank 模式下所有 rank 都必须进入 collective）
+        if self.use_comet:
+            comet_scores = self._compute_comet_scores_distributed(comet_samples)
+            global_rews = list(comet_scores) if comet_scores else []
 
         # 第二遍：计算过程奖励
         for b in range(batch_size):

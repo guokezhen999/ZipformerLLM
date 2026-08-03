@@ -79,13 +79,30 @@ def _get_vllm_actor_cls():
 
         def reload_weights(self, model_path: str) -> bool:
             try:
-                # vLLM 0.19.x API: LLM.llm_engine → LLMEngine.model_executor
+                # vLLM 0.19+ V1：通过 collective_rpc 原地重载 HF checkpoint 目录
+                if hasattr(self._llm, "collective_rpc"):
+                    self._llm.collective_rpc(
+                        "reload_weights",
+                        kwargs={"weights_path": model_path},
+                    )
+                    logging.warning(
+                        f"[VLLMActor] reload_weights OK via collective_rpc "
+                        f"from {model_path}"
+                    )
+                    return True
+
+                # 旧版 v0 引擎回退路径
                 engine = self._llm.llm_engine
-                engine.model_executor.driver_worker.model_runner.model.load_weights(model_path)
-                logging.info(f"[VLLMActor] 已从 {model_path} 重新加载权重")
+                engine.model_executor.driver_worker.model_runner.model.load_weights(
+                    model_path
+                )
+                logging.warning(f"[VLLMActor] 已从 {model_path} 重新加载权重 (legacy)")
                 return True
             except Exception as e:
-                logging.debug(f"[VLLMActor] reload_weights 失败: {e}")
+                logging.warning(
+                    f"[VLLMActor] reload_weights 失败: {type(e).__name__}: {e}",
+                    exc_info=True,
+                )
                 return False
 
         def health(self) -> bool:

@@ -57,6 +57,9 @@ class SpeechLLMLightningASTGRPOMultiVLLM(SpeechLLMLightningASTGRPOVLLM):
         if not self.finetune_encoder:
             self.audio_encoder.eval()
 
+        # 仅在 comet_rank（或未指定时所有 rank）预热 COMET
+        self._warmup_comet_if_needed()
+
         # 外部预启动的 vLLM actor 可能加载的不是当前训练 checkpoint
         # 中的 LLM / special token 权重，第一批生成前必须先同步一次。
         self._sync_vllm_weights()

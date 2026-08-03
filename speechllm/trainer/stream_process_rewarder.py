@@ -1,3 +1,4 @@
+import logging
 import re
 import torch
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
@@ -93,16 +94,24 @@ class StreamProcessRewarder:
         if not source_text or not gen_full_text or not ref_full_text:
             return 0.0
         try:
-            prev_device = torch.cuda.current_device()
+            prev_device = torch.cuda.current_device() if torch.cuda.is_available() else None
+            predict_kwargs = {
+                "batch_size": 1,
+                "gpus": self.comet_gpus,
+                "progress_bar": False,
+            }
+            if self.comet_gpus > 0 and prev_device is not None:
+                # 多卡可见时强制落到当前 process 的 GPU（如 rank3 -> cuda:3）
+                predict_kwargs["devices"] = [int(prev_device)]
             result = self._comet_model.predict(
                 [{"src": source_text, "mt": gen_full_text, "ref": ref_full_text}],
-                batch_size=1,
-                gpus=self.comet_gpus,
-                progress_bar=False,
+                **predict_kwargs,
             )
-            torch.cuda.set_device(prev_device)
+            if prev_device is not None:
+                torch.cuda.set_device(prev_device)
             return float(result.scores[0])
-        except Exception:
+        except Exception as e:
+            logging.warning(f"[COMET] compute_global_comet failed: {type(e).__name__}: {e}")
             return 0.0
 
     def compute_global_comet_batch(self, comet_samples):
@@ -119,16 +128,27 @@ class StreamProcessRewarder:
         if not comet_samples:
             return []
         try:
-            prev_device = torch.cuda.current_device()
+            prev_device = torch.cuda.current_device() if torch.cuda.is_available() else None
+            predict_kwargs = {
+                "batch_size": len(comet_samples),
+                "gpus": self.comet_gpus,
+                "progress_bar": False,
+            }
+            if self.comet_gpus > 0 and prev_device is not None:
+                # 多卡可见时强制落到当前 process 的 GPU（如 rank3 -> cuda:3）
+                predict_kwargs["devices"] = [int(prev_device)]
             result = self._comet_model.predict(
                 comet_samples,
-                batch_size=len(comet_samples),
-                gpus=self.comet_gpus,
-                progress_bar=False,
+                **predict_kwargs,
             )
-            torch.cuda.set_device(prev_device)
+            if prev_device is not None:
+                torch.cuda.set_device(prev_device)
             return [float(s) for s in result.scores]
-        except Exception:
+        except Exception as e:
+            logging.warning(
+                f"[COMET] compute_global_comet_batch failed "
+                f"({len(comet_samples)} samples): {type(e).__name__}: {e}"
+            )
             return [0.0] * len(comet_samples)
 
     def compute_process_reward_comet(self, gen_chunks, target_chunks, chunk_id,

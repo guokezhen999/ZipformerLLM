@@ -43,6 +43,8 @@ class SpeechLLMLightningASTGRPO(SpeechLLMLightningStreamAST):
         self.comet_model_path = model_config.train.get("comet_model_path", None)
         self.use_comet = self.comet_model_path is not None
         self.comet_gpus = model_config.train.get("comet_gpus", 0)  # 0=CPU, 1=GPU
+        # 仅在指定 rank 加载/运行 COMET；None 表示每张卡各自加载
+        self.comet_rank = model_config.train.get("comet_rank", None)
         self.rewarder = StreamProcessRewarder(
             bleu_weights=bleu_weights,
             comet_model_path=self.comet_model_path,
@@ -278,6 +280,76 @@ class SpeechLLMLightningASTGRPO(SpeechLLMLightningStreamAST):
 
         return sglang_states_G
 
+    def _should_own_comet(self) -> bool:
+        """当前 rank 是否负责加载/运行 COMET。"""
+        if not self.use_comet:
+            return False
+        if self.comet_rank is None:
+            return True
+        return int(self.global_rank) == int(self.comet_rank)
+
+    def _warmup_comet_if_needed(self) -> None:
+        """仅在拥有 COMET 的 rank 上预热模型。"""
+        if not self._should_own_comet():
+            if self.use_comet and self.comet_rank is not None:
+                logging.info(
+                    f"[GPU {self.global_rank}] skip COMET load "
+                    f"(owned by rank {self.comet_rank})"
+                )
+            return
+        self.rewarder._load_comet_model()
+        logging.info(
+            f"[GPU {self.global_rank}] COMET model loaded from {self.comet_model_path}"
+        )
+
+    def _compute_comet_scores_distributed(self, comet_samples):
+        """在 comet_rank 上集中计算 COMET，再把本 rank 的分数返回。
+
+        comet_rank is None 时退化为本地计算。
+        """
+        if not self.use_comet:
+            return None
+
+        if (
+            self.comet_rank is None
+            or not torch.distributed.is_available()
+            or not torch.distributed.is_initialized()
+            or torch.distributed.get_world_size() == 1
+        ):
+            return self.rewarder.compute_global_comet_batch(comet_samples)
+
+        world_size = torch.distributed.get_world_size()
+        rank = torch.distributed.get_rank()
+        comet_rank = int(self.comet_rank)
+        if not (0 <= comet_rank < world_size):
+            raise ValueError(
+                f"comet_rank={comet_rank} out of range for world_size={world_size}"
+            )
+
+        gathered = [None] * world_size
+        torch.distributed.all_gather_object(gathered, comet_samples)
+
+        result_per_rank = None
+        if rank == comet_rank:
+            sizes = [len(samples or []) for samples in gathered]
+            flat = []
+            for samples in gathered:
+                if samples:
+                    flat.extend(samples)
+            all_scores = (
+                self.rewarder.compute_global_comet_batch(flat) if flat else []
+            )
+            result_per_rank = []
+            offset = 0
+            for sz in sizes:
+                result_per_rank.append(all_scores[offset:offset + sz])
+                offset += sz
+
+        obj_list = [result_per_rank]
+        torch.distributed.broadcast_object_list(obj_list, src=comet_rank)
+        result_per_rank = obj_list[0]
+        return result_per_rank[rank]
+
     def compute_process_bleu_rewards(self, sglang_states_G, targets_metadata, batch_size, batch_idx=None):
         """
         按论文公式 (3)(5)(6) 计算逐帧过程奖励与优势。
@@ -322,7 +394,7 @@ class SpeechLLMLightningASTGRPO(SpeechLLMLightningStreamAST):
                         "mt": gen_full_text,
                         "ref": ref_full_text,
                     })
-            comet_scores = self.rewarder.compute_global_comet_batch(comet_samples)
+            comet_scores = self._compute_comet_scores_distributed(comet_samples)
             self._last_comet_scores = comet_scores  # 保存供 training_step 日志使用
 
         # step1: 计算每个生成、每个 chunk 的原始过程奖励 r_t(i)，公式(3)
@@ -558,9 +630,7 @@ class SpeechLLMLightningASTGRPO(SpeechLLMLightningStreamAST):
             self.audio_encoder.eval()
 
         # 预热 COMET 模型（避免首次调用时阻塞训练）
-        if self.use_comet:
-            self.rewarder._load_comet_model()
-            logging.info(f"[GPU {self.global_rank}] COMET model loaded from {self.comet_model_path}")
+        self._warmup_comet_if_needed()
 
         # 启动共享内存代理（如果启用）
         if self.use_shm_proxy and self._shm_proxy_process is None:
@@ -920,10 +990,10 @@ class SpeechLLMLightningASTGRPO(SpeechLLMLightningStreamAST):
                 global_bleu = self.rewarder.compute_global_bleu(gen_chunks, target_chunks)
                 global_rews.append(global_bleu)
 
-        # 批量计算 COMET
-        if self.use_comet and comet_samples:
-            comet_scores = self.rewarder.compute_global_comet_batch(comet_samples)
-            global_rews = list(comet_scores)
+        # 批量计算 COMET（comet_rank 模式下所有 rank 都必须进入 collective）
+        if self.use_comet:
+            comet_scores = self._compute_comet_scores_distributed(comet_samples)
+            global_rews = list(comet_scores) if comet_scores else []
 
         # 第二遍：计算过程奖励
         for b in range(batch_size):
