@@ -1,15 +1,15 @@
 {
     "data": {
-        "train_shar_dirs": "data/fbank/speechllm_yodas/shar/en2zh_grpo",
-        "shard_assignment_file": "data/shar/en2zh_grpo_shard_assignment_ws6.json",
+        "train_shar_dirs": "data/fbank/speechllm_yodas/shar/en2zh_grpo_600h",
+        "shard_assignment_file": "data/shar/en2zh_grpo_600h_shard_assignment_ws4.json",
         "valid_dataset": [
             "data/cuts/dev/granary_yodas_en2zh_grpo_dev_repacked.jsonl"
         ],
         "concatenate_cuts": false,
         "enable_musan": false,
         "enable_spec_aug": false,
-        "max_duration": 80,
-        "max_batch_size": 8,
+        "max_duration": 140,
+        "max_batch_size": 14,
         "num_buckets": 30,
         "lazy_load": true,
         "pad_last_chunk": true,
@@ -72,17 +72,17 @@
     },
     "train": {
         "exp_dir": "exp",
-        "exp_name": "grpo_sglang_kl_0.05_lr_1e-6_comet",
+        "exp_name": "grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000",
         "checkpoint_dir_name": "checkpoints",
         "seed": 42,
-        "gpus": 6,
+        "gpus": 4,
         "grad_accumulate_steps": 1,
         "finetune_special_tokens": true,
         "lr_llm": 1e-6,
         "lr_special_tokens": 1e-6,
         "weight_decay": 0.0,
         "weight_decay_special_tokens": 0.0,
-        "max_steps": 1000,
+        "max_steps": 2000,
         "scheduler": {
             "name": "step_cosine",
             "warmup_steps": 20,
@@ -101,19 +101,19 @@
         "alpha": 0.5,
         "comet_model_path": "pretrained_models/wmt22-comet-da/checkpoints/model.ckpt",
         "comet_gpus": 1,
+        "comet_rank": 3,
         "temperature": 0.8,
         "top_p": 0.95,
         "max_new_tokens": 64,
         "repetition_penalty": 1.0,
         "bleu_weights": [0.25, 0.25, 0.25, 0.25],
-        "sglang_base_port": 30000,
-        "sglang_num_instances": 2,
-        "sglang_server_url": "http://127.0.0.1:30000",
-        "sglang_sync_interval": 16,
-        "sglang_weight_sync_path": "/dev/shm/sglang_sync_weights",
-        "use_shm_proxy": true,
-        "shm_proxy_port_offset": 31000,
+        "ray_address": "auto",
+        "vllm_model_path": "pretrained_models/stage2/epoch-epoch=14-step-step=194787/llm_epoch-epoch=14-step-step=194787",
+        "vllm_weight_sync_path": "/dev/shm/vllm_sync_weights",
+        "vllm_num_actors": 4,
+        "vllm_actor_name_prefix": "vllm_actor",
         "old_policy_sync_interval": 0,
-        "ref_model_sync_interval": 16
+        "ref_model_sync_interval": 16,
+        "vllm_sync_interval": 16
     }
 }

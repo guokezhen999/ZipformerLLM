@@ -29,7 +29,7 @@ echo "Logs: main=${MAIN_LOG}, actor=${ACTOR_LOG}, train=${TRAIN_LOG}"
 # ============================================================
 # 配置
 # ============================================================
-CONFIG="conf/grpo_vllm_kl_0.05_lr_1e-6_comet_step_1000.json"
+CONFIG="conf/grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000.json"
 SFT_CKPT="pretrained_models/stage2/epoch-epoch=14-step-step=194787/epoch-epoch=14-step-step=194787.pt"
 VLLM_MODEL_PATH="pretrained_models/stage2/epoch-epoch=14-step-step=194787/llm_epoch-epoch=14-step-step=194787"
 VLLM_WEIGHT_SYNC_PATH="/dev/shm/vllm_sync_weights"
