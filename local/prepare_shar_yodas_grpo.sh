@@ -17,6 +17,17 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+CUTS_DIR="${CUTS_DIR:-/nfs/guokezhen/ZipformerLLM/data/cuts}"
+SHAR_ROOT="${SHAR_ROOT:-data/fbank/speechllm_yodas/shar}"
+
+jsonl_inputs=(
+  "${CUTS_DIR}/granary_yodas_en2zh_grpo_train_selected_300h.jsonl"
+)
+
+shar_outputs=(
+  "${SHAR_ROOT}/en2zh_grpo"
+)
+
 # ---- options ----
 shard_size=3000
 num_jobs=32
@@ -35,8 +46,22 @@ while [[ $# -gt 0 ]]; do
       num_jobs="$2"; shift 2 ;;
     --no-backup)
       backup_existing=0; shift ;;
+    --input)
+      if [[ "$2" != /* && "$2" != */* ]]; then
+        jsonl_inputs=("${CUTS_DIR}/$2")
+      else
+        jsonl_inputs=("$2")
+      fi
+      shift 2 ;;
+    --output)
+      if [[ "$2" != /* && "$2" != */* ]]; then
+        shar_outputs=("${SHAR_ROOT}/$2")
+      else
+        shar_outputs=("$2")
+      fi
+      shift 2 ;;
     -h|--help)
-      echo "Usage: bash local/prepare_shar_yodas_grpo.sh [--shard-size N] [--num-jobs N] [--no-backup]"
+      echo "Usage: bash local/prepare_shar_yodas_grpo.sh [--shard-size N] [--num-jobs N] [--no-backup] [--input PATH] [--output PATH]"
       exit 0 ;;
     *)
       echo "Unknown arg: $1"; exit 1 ;;
@@ -50,17 +75,6 @@ if command -v conda >/dev/null 2>&1; then
   conda activate speechllm 2>/dev/null || true
 fi
 PYTHON="${PYTHON:-python}"
-
-CUTS_DIR="${CUTS_DIR:-/nfs/guokezhen/ZipformerLLM/data/cuts}"
-SHAR_ROOT="data/fbank/speechllm_yodas/shar"
-
-jsonl_inputs=(
-  "${CUTS_DIR}/granary_yodas_en2zh_grpo_train_selected_300h.jsonl"
-)
-
-shar_outputs=(
-  "${SHAR_ROOT}/en2zh_grpo"
-)
 
 for f in "${jsonl_inputs[@]}"; do
   if [[ ! -f "$f" ]]; then

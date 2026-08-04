@@ -53,3 +53,5 @@ temp/
 .mypy_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+
+compare/
