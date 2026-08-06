@@ -32,6 +32,78 @@ def extract_fbank(waveform_np: np.ndarray, sample_rate: int = 16000) -> torch.Te
     )
 
 
+def _get_kv_seq_length(past_key_values) -> int:
+    if past_key_values is None:
+        return 0
+    if hasattr(past_key_values, "get_seq_length"):
+        return int(past_key_values.get_seq_length())
+    if isinstance(past_key_values, (tuple, list)) and past_key_values:
+        return int(past_key_values[0][0].size(2))
+    return 0
+
+
+def _left_truncate_kv_cache(past_key_values, prompt_len: int, keep_from: int):
+    """Keep tokens [0:prompt_len) + [keep_from:seq_len). Returns (new_past, new_len)."""
+    if past_key_values is None or keep_from <= prompt_len:
+        return past_key_values, _get_kv_seq_length(past_key_values)
+
+    old_len = _get_kv_seq_length(past_key_values)
+    if old_len <= keep_from:
+        return past_key_values, old_len
+    new_len = prompt_len + (old_len - keep_from)
+
+    def _slice(k, v):
+        return (
+            torch.cat([k[:, :, :prompt_len, :], k[:, :, keep_from:, :]], dim=2).contiguous(),
+            torch.cat([v[:, :, :prompt_len, :], v[:, :, keep_from:, :]], dim=2).contiguous(),
+        )
+
+    # transformers DynamicCache (key_cache / value_cache)
+    if hasattr(past_key_values, "key_cache") and hasattr(past_key_values, "value_cache"):
+        for i in range(len(past_key_values.key_cache)):
+            k = past_key_values.key_cache[i]
+            v = past_key_values.value_cache[i]
+            if k is None or k.numel() == 0:
+                continue
+            nk, nv = _slice(k, v)
+            past_key_values.key_cache[i] = nk
+            past_key_values.value_cache[i] = nv
+        if hasattr(past_key_values, "_seen_tokens"):
+            past_key_values._seen_tokens = new_len
+        return past_key_values, new_len
+
+    # transformers Cache with .layers (newer versions)
+    if hasattr(past_key_values, "layers"):
+        for layer in past_key_values.layers:
+            k = getattr(layer, "keys", None)
+            v = getattr(layer, "values", None)
+            if k is None or v is None or k.numel() == 0:
+                continue
+            nk, nv = _slice(k, v)
+            layer.keys = nk
+            layer.values = nv
+        if hasattr(past_key_values, "_seen_tokens"):
+            past_key_values._seen_tokens = new_len
+        return past_key_values, new_len
+
+    # Legacy tuple[(K,V), ...]
+    if isinstance(past_key_values, (tuple, list)):
+        new_past = []
+        for layer_past in past_key_values:
+            k, v = layer_past[0], layer_past[1]
+            nk, nv = _slice(k, v)
+            if len(layer_past) > 2:
+                new_past.append((nk, nv, *layer_past[2:]))
+            else:
+                new_past.append((nk, nv))
+        return tuple(new_past), new_len
+
+    logging.warning(
+        f"Unknown past_key_values type {type(past_key_values)}; cannot left-truncate"
+    )
+    return None, 0
+
+
 # ---------------------------------------------------------------------------
 # LLMDecoder
 # ---------------------------------------------------------------------------
@@ -39,16 +111,30 @@ class LLMDecoder:
     """Single-task LLM decoder that maintains its own KV cache and generation state.
 
     KV cache eviction policy:
-        Keep at most `max_segments` segments of history (48 / num_chunks).
+        - Sentence-end punctuation: full clear.
+        - When text-producing segments reach `max_segments`: left-truncate KV to keep
+          the prompt + the most recent `keep_segments` audio/text segments
+          (`keep_segments<=0` restores legacy full-clear behaviour).
         Eviction only happens when the current segment actually produces text output,
         so silent chunks never trigger a cache clear.
     """
 
-    def __init__(self, model, task: str = "asr", lang: str = "Chinese", num_chunks: int = 1, max_new_tokens: int = 200, repetition_penalty: float = 1.0, repetition_penalty_window: int = 0):
+    def __init__(
+        self,
+        model,
+        task: str = "asr",
+        lang: str = "Chinese",
+        num_chunks: int = 1,
+        max_new_tokens: int = 200,
+        repetition_penalty: float = 1.0,
+        repetition_penalty_window: int = 0,
+        max_segments: int = None,
+        keep_segments: int = 16,
+    ):
         self.model = model
         self.task = task
         self.lang = lang
-        self.num_chunks = num_chunks
+        self.num_chunks = max(1, int(num_chunks))
         self.max_new_tokens = max_new_tokens
         self.repetition_penalty = repetition_penalty
         self.repetition_penalty_window = repetition_penalty_window
@@ -57,9 +143,12 @@ class LLMDecoder:
         self.is_new_seg = True
         self.embed_chunks_count = 0
 
-        # KV cache eviction: keep 48 adapter-chunks worth of history
-        self.max_segments = 48 // num_chunks  # 1→48, 2→24, 4→12
-        self.segment_count = 0  # how many segments with text output accumulated
+        # Trigger threshold / sliding retention
+        self.max_segments = int(max_segments) if max_segments is not None else max(1, 64 // self.num_chunks)
+        self.keep_segments = int(keep_segments)
+        self.segment_count = 0  # text-producing segments since last full clear
+        self.prompt_len = 0
+        self.seg_end_lens = []  # past_len after each text-producing segment
 
     def _get_prompt(self) -> str:
         if self.task == "ast":
@@ -69,30 +158,88 @@ class LLMDecoder:
             return "Transcribe the audio: "
         return f"Transcribe the audio in {self.lang}: "
 
+    def _compute_prompt_len(self) -> int:
+        ids = self.model.llm_tokenizer(
+            self._get_prompt(), return_tensors="pt", add_special_tokens=False
+        ).input_ids
+        return int(ids.shape[-1])
+
+    def _full_clear_cache(self):
+        self.past_cache = None
+        self.past_len = 0
+        self.segment_count = 0
+        self.prompt_len = 0
+        self.seg_end_lens = []
+
+    def _slide_kv_cache(self):
+        """Left-truncate KV to prompt + last keep_segments text-producing spans."""
+        k = min(self.keep_segments, self.segment_count)
+        n = len(self.seg_end_lens)
+        if k <= 0 or n == 0:
+            self._full_clear_cache()
+            self.is_new_seg = True
+            return
+        if k >= n:
+            self.segment_count = n
+            return
+
+        drop = n - k
+        keep_from = self.seg_end_lens[drop - 1]
+        if keep_from < self.prompt_len:
+            keep_from = self.prompt_len
+
+        old_len = self.past_len
+        new_past, new_len = _left_truncate_kv_cache(self.past_cache, self.prompt_len, keep_from)
+        if new_past is None and new_len == 0 and self.past_cache is not None:
+            logging.warning(
+                f"  -> [{self.task.upper()}] Left-truncate failed, falling back to full clear"
+            )
+            self._full_clear_cache()
+            self.is_new_seg = True
+            return
+
+        self.past_cache = new_past
+        self.past_len = new_len
+        self.seg_end_lens = [
+            self.prompt_len + (e - keep_from) for e in self.seg_end_lens[drop:]
+        ]
+        self.segment_count = k
+        self.is_new_seg = True
+        logging.info(
+            f"  -> [{self.task.upper()}] Segment limit reached "
+            f"(kept {k}/{n} segments, kv {old_len}→{new_len}, prompt={self.prompt_len})"
+        )
+
     def _maybe_evict_cache(self, out_text: str) -> str:
-        """Increment segment counter and evict KV cache if history exceeds max_segments.
+        """Increment segment counter and evict/slide KV cache if needed.
 
         Only called when out_text is non-empty (current segment produced output).
         Returns (possibly modified) out_text.
         """
         self.segment_count += 1
+        self.seg_end_lens.append(int(self.past_len))
 
         # Sentence-end punctuation always clears cache (original behaviour)
         if out_text.rstrip().endswith(_SENT_END):
             out_text = out_text.rstrip() + " "
-            logging.info(f"  -> [{self.task.upper()}] Sentence end, clearing KV cache (segments={self.segment_count})")
-            self.past_cache = None
-            self.past_len = 0
-            self.segment_count = 0
+            logging.info(
+                f"  -> [{self.task.upper()}] Sentence end, clearing KV cache "
+                f"(segments={self.segment_count})"
+            )
+            self._full_clear_cache()
             return out_text
 
-        # Evict when accumulated segments exceed the limit
+        # Hit trigger threshold → slide (or full-clear if keep_segments<=0)
         if self.segment_count >= self.max_segments:
-            logging.info(f"  -> [{self.task.upper()}] Segment limit reached ({self.segment_count}/{self.max_segments}), clearing KV cache")
-            self.past_cache = None
-            self.past_len = 0
-            self.segment_count = 0
-            self.is_new_seg = True
+            if self.keep_segments <= 0:
+                logging.info(
+                    f"  -> [{self.task.upper()}] Segment limit reached "
+                    f"({self.segment_count}/{self.max_segments}), clearing KV cache"
+                )
+                self._full_clear_cache()
+                self.is_new_seg = True
+            else:
+                self._slide_kv_cache()
 
         return out_text
 
@@ -100,6 +247,9 @@ class LLMDecoder:
         """Feed an encoded audio chunk. Returns generated text (non-empty only at segment end)."""
         self.embed_chunks_count += 1
         is_seg_end = (self.embed_chunks_count >= self.num_chunks)
+
+        if self.past_cache is None and self.is_new_seg:
+            self.prompt_len = self._compute_prompt_len()
 
         t_start = time.time()
         out_text, self.past_cache, self.past_len = self.model.generate(
@@ -129,6 +279,9 @@ class LLMDecoder:
 
     def finalize_chunk(self, chunk_out: torch.Tensor, is_last: bool) -> str:
         """Finalize-phase: feed chunk, decode only on the last chunk."""
+        if self.past_cache is None and self.is_new_seg:
+            self.prompt_len = self._compute_prompt_len()
+
         t_start = time.time()
         out_text, self.past_cache, self.past_len = self.model.generate(
             audio_chunk_embed=chunk_out,
@@ -153,11 +306,9 @@ class LLMDecoder:
         return ""
 
     def reset(self):
-        self.past_cache = None
-        self.past_len = 0
+        self._full_clear_cache()
         self.is_new_seg = True
         self.embed_chunks_count = 0
-        self.segment_count = 0
 
 
 # ---------------------------------------------------------------------------
@@ -197,11 +348,6 @@ class StreamingSessionBase:
 
         self.sample_rate = 16000
         self.samples_per_frame = int(self.sample_rate * 0.01)  # 160
-
-        # Audio end-time (seconds) of the most recently encoded chunk.
-        # Set before each _on_encoder_output / _on_finalize_encoder_output so
-        # subclasses can attach a timestamp to generated text.
-        self.chunk_end_time: float = 0.0
 
     # -- encoder helper --
     def _run_encoder(self, chunk_fbank: torch.Tensor) -> torch.Tensor:
@@ -251,7 +397,6 @@ class StreamingSessionBase:
             logging.info(f"{prefix}Encoder Step {self.adapter_step}] {abs_s/100:.2f}s - {(abs_s+self.tail_length)/100:.2f}s")
 
             chunk_out = self._run_encoder(chunk_fbank)
-            self.chunk_end_time = round((self.absolute_frame_pos + self.tail_length) / 100.0, 2)
             self._on_encoder_output(chunk_out)
 
             self.fbank_frame_offset += self.stride
@@ -329,9 +474,8 @@ class StreamingSessionBase:
                     logging.info(f"{prefix}VAD Finalize Step {self.adapter_step}] {self.absolute_frame_pos/100:.2f}s last={is_last}")
 
                     chunk_out = self._run_encoder(chunk_fbank)
-                    self.chunk_end_time = round((self.absolute_frame_pos + self.tail_length) / 100.0, 2)
-                    self._on_finalize_encoder_output(chunk_out, is_last)
                     self.absolute_frame_pos += self.stride
+                    self._on_finalize_encoder_output(chunk_out, is_last)
 
                 # Reset decoders (subclass hook)
                 self._on_vad_reset()
@@ -410,9 +554,8 @@ class StreamingSessionBase:
             logging.info(f"{prefix}Finalize Step {self.adapter_step}] {self.absolute_frame_pos/100:.2f}s last={is_last}")
 
             chunk_out = self._run_encoder(chunk_fbank)
-            self.chunk_end_time = round((self.absolute_frame_pos + self.tail_length) / 100.0, 2)
-            self._on_finalize_encoder_output(chunk_out, is_last)
             self.absolute_frame_pos += self.stride
+            self._on_finalize_encoder_output(chunk_out, is_last)
 
         # reset buffers
         self.waveform_buffer = np.array([], dtype=np.float32)

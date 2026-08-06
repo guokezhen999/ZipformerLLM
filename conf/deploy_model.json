@@ -1,0 +1,36 @@
+{
+    "data": {},
+    "model": {
+        "zipformer": {
+            "feature_dim": 80,
+            "encoder_dim": "192,256,384,512,384,256",
+            "num_encoder_layers": "2,2,3,4,3,2",
+            "downsampling_factor": "1,2,4,8,4,2",
+            "feedforward_dim": "512,768,1024,1536,1024,768",
+            "num_heads": "4,4,4,8,4,4",
+            "encoder_unmasked_dim": "192,192,256,256,256,192",
+            "query_head_dim": 32,
+            "pos_head_dim": 4,
+            "value_head_dim": 12,
+            "pos_dim": 48,
+            "cnn_module_kernel": "31,31,15,15,15,31",
+            "chunk_size": 16,
+            "left_context_frames": 128,
+            "causal": true
+        },
+        "adapter": {
+            "name": "pooling-adapter",
+            "input_dim": 512,
+            "hidden_dim": 2048,
+            "llm_dim": 1024,
+            "num_layers": 2,
+            "pooling": "cat",
+            "pooling_factor": 4,
+            "dropout": 0.0
+        },
+        "llm": {
+            "enable_lora": false
+        }
+    },
+    "train": {}
+}

@@ -18,7 +18,25 @@ def _get_vllm_actor_cls():
                      extra_kwargs: dict = None):
             import torch  # noqa: F401 — ensure torch is loaded in actor process
             import logging
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+            # Prefer the GPU Ray already bound via CUDA_VISIBLE_DEVICES.
+            # Only set an explicit id when the env is unset; overwriting Ray's
+            # remapping with a physical id that is not visible (e.g. GPU 1 on a
+            # 1-GPU machine) makes CUDA empty and vLLM fails during model inspect.
+            if "CUDA_VISIBLE_DEVICES" not in os.environ or os.environ["CUDA_VISIBLE_DEVICES"] == "":
+                os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+            else:
+                # Keep Ray assignment; log physical request for debugging
+                logging.info(
+                    f"[VLLMActor] Ray CUDA_VISIBLE_DEVICES="
+                    f"{os.environ['CUDA_VISIBLE_DEVICES']} (requested gpu_id={gpu_id})"
+                )
+
+            if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
+                raise RuntimeError(
+                    f"[VLLMActor] No CUDA device visible "
+                    f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}, "
+                    f"requested gpu_id={gpu_id}). Check VLLM_GPUS / Ray --num-gpus."
+                )
 
             # ── 抑制 vLLM tqdm 进度条输出（不能 disable，vLLM 用 tqdm 计时间）──
             try:
@@ -40,6 +58,10 @@ def _get_vllm_actor_cls():
 
             extra_kwargs = extra_kwargs or {}
             extra_kwargs.setdefault("disable_log_stats", True)
+            # Prefix KV reuse for EmbedsPrompt: vLLM hashes prompt_embeds per
+            # block (sha256). Consecutive streaming segments that share a
+            # common embed prefix will hit cached KV blocks when sticky-routed
+            # to the same actor.
             self._llm = LLM(
                 model=model_path,
                 tensor_parallel_size=tp_size,
@@ -47,35 +69,58 @@ def _get_vllm_actor_cls():
                 gpu_memory_utilization=gpu_memory_utilization,
                 trust_remote_code=True,
                 enable_prompt_embeds=True,
-                enable_prefix_caching=False,
+                enable_prefix_caching=True,
                 enable_chunked_prefill=False,
                 async_scheduling=False,
                 **extra_kwargs,
             )
-            logging.info(f"[VLLMActor gpu={gpu_id}] 就绪，model={model_path}")
-        def generate(self, input_embeds: list, sampling_params_dict: dict) -> str:
+            logging.info(
+                f"[VLLMActor gpu={gpu_id}] ready model={model_path} "
+                f"prefix_caching=True"
+            )
+
+        @staticmethod
+        def _embeds_tensor(input_embeds: list):
             import torch
+            # Keep dtype stable across requests so prefix-block hashes match.
+            return torch.tensor(input_embeds, dtype=torch.bfloat16)
+
+        @staticmethod
+        def _pack_output(req_out) -> dict:
+            text = req_out.outputs[0].text if req_out.outputs else ""
+            n_cached = getattr(req_out, "num_cached_tokens", None) or 0
+            prompt_len = 0
+            if getattr(req_out, "prompt_token_ids", None) is not None:
+                prompt_len = len(req_out.prompt_token_ids)
+            return {
+                "text": text,
+                "num_cached_tokens": int(n_cached),
+                "prompt_len": int(prompt_len),
+            }
+
+        def generate(self, input_embeds: list, sampling_params_dict: dict) -> str:
             from vllm import SamplingParams as SP
             from vllm.inputs.llm import EmbedsPrompt
 
-            embeds = torch.tensor(input_embeds, dtype=torch.bfloat16)
+            embeds = self._embeds_tensor(input_embeds)
             sp = SP(**sampling_params_dict)
             prompt = EmbedsPrompt(prompt_embeds=embeds)
             outputs = self._llm.generate(prompt, sp)
+            # Keep str return for GRPO trainer compatibility.
             return outputs[0].outputs[0].text
 
         def generate_batch(self, batch_embeds: list, sampling_params_dict: dict) -> list:
-            import torch
+            """Return list of {text, num_cached_tokens, prompt_len}."""
             from vllm import SamplingParams as SP
             from vllm.inputs.llm import EmbedsPrompt
 
             sp = SP(**sampling_params_dict)
-            prompts = []
-            for emb_list in batch_embeds:
-                embeds = torch.tensor(emb_list, dtype=torch.float16)
-                prompts.append(EmbedsPrompt(prompt_embeds=embeds))
+            prompts = [
+                EmbedsPrompt(prompt_embeds=self._embeds_tensor(emb_list))
+                for emb_list in batch_embeds
+            ]
             outputs = self._llm.generate(prompts, sp)
-            return [o.outputs[0].text for o in outputs]
+            return [self._pack_output(o) for o in outputs]
 
         def reload_weights(self, model_path: str) -> bool:
             try:

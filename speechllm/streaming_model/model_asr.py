@@ -103,10 +103,15 @@ class StreamingSpeechLLM(nn.Module):
         llm_dtype = next(self.llm_model.parameters()).dtype
         print(f"Model Precision: Audio Encoder={encoder_dtype}, Connector={connector_dtype}, LLM={llm_dtype}")
 
-    def load_checkpoint(self, checkpoint_path):
-        """从检查点加载权重，支持 DeepSpeed 目录和单文件"""
+    def load_checkpoint(self, checkpoint_path, load_llm: bool = True):
+        """从检查点加载权重，支持 DeepSpeed 目录和单文件。
+
+        Args:
+            checkpoint_path: checkpoint 路径（.pt / .ckpt / DeepSpeed 目录）。
+            load_llm: 若 False，只加载 encoder + connector（LLM 已从 HF 目录加载时使用）。
+        """
         print_param_status(self, "BEFORE LOADING")
-        print(f"Loading checkpoint from {checkpoint_path}")
+        print(f"Loading checkpoint from {checkpoint_path} (load_llm={load_llm})")
         
         if os.path.isdir(checkpoint_path):
             print("Detected DeepSpeed checkpoint directory. Consolidating stages...")
@@ -164,29 +169,34 @@ class StreamingSpeechLLM(nn.Module):
         if not conn_found:
             print("❌ Warning: connector weights NOT found!")
 
-        # 3. LLM (including LoRA)
-        llm_prefixes = ["llm_model.", "model.llm_model.", "llm."]
-        llm_found = False
-        for p in llm_prefixes:
-            sub = extract_sub_dict(state_dict, p)
-            if sub:
-                # 使用 load_state_dict 直接加载到 PeftModel，这会同时处理 LoRA 和基础模型权重
-                missing, unexpected = self.llm_model.load_state_dict(sub, strict=False)
-                print(f"✅ Loaded LLM/LoRA from prefix '{p}' ({len(sub)} keys)")
+        # 3. LLM (including LoRA) — skip when LLM already loaded from HF export
+        if load_llm:
+            llm_prefixes = ["llm_model.", "model.llm_model.", "llm."]
+            llm_found = False
+            for p in llm_prefixes:
+                sub = extract_sub_dict(state_dict, p)
+                if sub:
+                    # 使用 load_state_dict 直接加载到 PeftModel，这会同时处理 LoRA 和基础模型权重
+                    missing, unexpected = self.llm_model.load_state_dict(sub, strict=False)
+                    print(f"✅ Loaded LLM/LoRA from prefix '{p}' ({len(sub)} keys)")
+                    llm_found = True
+                    break
+
+            if not llm_found and "llm_lora" in state_dict:
+                from peft import set_peft_model_state_dict
+                set_peft_model_state_dict(self.llm_model, state_dict["llm_lora"])
+                print(f"✅ Loaded llm_lora (nested PEFT format)")
                 llm_found = True
-                break
-        
-        if not llm_found and "llm_lora" in state_dict:
-            from peft import set_peft_model_state_dict
-            set_peft_model_state_dict(self.llm_model, state_dict["llm_lora"])
-            print(f"✅ Loaded llm_lora (nested PEFT format)")
-            llm_found = True
-            
-        if not llm_found:
-            print("❌ Warning: LLM/LoRA weights NOT found in checkpoint!")
+
+            if not llm_found:
+                print("❌ Warning: LLM/LoRA weights NOT found in checkpoint!")
+        else:
+            print("⏩ Skipping LLM weight load from checkpoint (using HF LLM weights).")
 
         # =====================================================================
         # [修改点 2] Special Token Patching (自动适配全量微调与 Patch 模式)
+        # 即使 LLM 来自 HF 导出，也必须从 .pt 加载 patch：vLLM decoder 的 <A>/</A>
+        # prompt embeds 依赖 special_token_input_patch（见 vllm_decoder._ensure_special_embeds）。
         # =====================================================================
         patch_keys = ["special_token_input_patch", "special_token_output_patch"]
         patch_loaded_count = 0

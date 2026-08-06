@@ -28,6 +28,8 @@ global_use_vad = False
 global_vad_threshold = 0.5
 global_vad_min_silence_duration_ms = 200
 global_vad_speech_pad_ms = 100
+global_keep_segments = 16
+global_max_segments = None  # None → 64 // num_chunks per decoder
 
 
 def _option_html(options, selected_idx=0):
@@ -46,12 +48,17 @@ async def lifespan(app: FastAPI):
     global global_ast_lang_options, global_asr_lang_options
     global global_vad_model, global_use_vad, global_vad_threshold
     global global_vad_min_silence_duration_ms, global_vad_speech_pad_ms
+    global global_keep_segments, global_max_segments
     global_model, global_config, global_device = load_model_from_env()
     global_repetition_penalty = float(os.environ.get("SPEECHLLM_REPETITION_PENALTY", "1.0"))
     global_repetition_penalty_window = int(os.environ.get("SPEECHLLM_REPETITION_PENALTY_WINDOW", "0"))
     global_ast_lang_options = os.environ.get("SPEECHLLM_AST_LANG_OPTIONS", "Chinese,English,Japanese,French,German,Spanish").split(",")
     global_asr_lang_options = os.environ.get("SPEECHLLM_ASR_LANG_OPTIONS", "auto,Chinese,English").split(",")
+    global_keep_segments = int(os.environ.get("SPEECHLLM_KEEP_SEGMENTS", "16"))
+    _max_seg = os.environ.get("SPEECHLLM_MAX_SEGMENTS", "").strip()
+    global_max_segments = int(_max_seg) if _max_seg else None
     logging.info(f"Repetition penalty: {global_repetition_penalty}, window: {global_repetition_penalty_window}")
+    logging.info(f"KV keep_segments={global_keep_segments}, max_segments={global_max_segments or '64//num_chunks'}")
     logging.info(f"AST lang options: {global_ast_lang_options}")
     logging.info(f"ASR lang options: {global_asr_lang_options}")
 
@@ -98,8 +105,20 @@ class ParallelSession(StreamingSessionBase):
                  enable_asr=True, enable_ast=True, repetition_penalty=1.0, repetition_penalty_window=0,
                  vad_handler=None):
         super().__init__(global_model, global_config, global_device, vad_handler=vad_handler)
-        self.asr_decoder = LLMDecoder(global_model, "asr", asr_lang, asr_num_chunks, repetition_penalty=repetition_penalty, repetition_penalty_window=repetition_penalty_window) if enable_asr else None
-        self.ast_decoder = LLMDecoder(global_model, "ast", ast_lang, ast_num_chunks, repetition_penalty=repetition_penalty, repetition_penalty_window=repetition_penalty_window) if enable_ast else None
+        self.asr_decoder = LLMDecoder(
+            global_model, "asr", asr_lang, asr_num_chunks,
+            repetition_penalty=repetition_penalty,
+            repetition_penalty_window=repetition_penalty_window,
+            max_segments=global_max_segments,
+            keep_segments=global_keep_segments,
+        ) if enable_asr else None
+        self.ast_decoder = LLMDecoder(
+            global_model, "ast", ast_lang, ast_num_chunks,
+            repetition_penalty=repetition_penalty,
+            repetition_penalty_window=repetition_penalty_window,
+            max_segments=global_max_segments,
+            keep_segments=global_keep_segments,
+        ) if enable_ast else None
         self.results = {"asr": "", "ast": ""}
 
     def _on_encoder_output(self, chunk_out):
