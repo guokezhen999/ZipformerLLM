@@ -1,7 +1,7 @@
 {
     "data": {
-        "train_shar_dirs": "data/fbank/speechllm_yodas/shar/en2zh_grpo",
-        "shard_assignment_file": "data/shar/en2zh_grpo_shard_assignment_ws4.json",
+        "train_shar_dirs": "data/fbank/speechllm_yodas/shar/en2zh_grpo_600h",
+        "shard_assignment_file": "data/shar/en2zh_grpo_600h_shard_assignment_ws4.json",
         "valid_dataset": [
             "data/cuts/dev/granary_yodas_en2zh_grpo_dev_repacked.jsonl"
         ],
@@ -72,7 +72,7 @@
     },
     "train": {
         "exp_dir": "exp",
-        "exp_name": "grpo_vllm_kl_0.05_lr_1e-6_comet",
+        "exp_name": "grpo_vllm_kl_0.05_lr_1e-6_comet_no_kl_step_2000",
         "checkpoint_dir_name": "checkpoints",
         "seed": 42,
         "gpus": 4,
@@ -82,7 +82,7 @@
         "lr_special_tokens": 1e-6,
         "weight_decay": 0.0,
         "weight_decay_special_tokens": 0.0,
-        "max_steps": 1000,
+        "max_steps": 2000,
         "scheduler": {
             "name": "step_cosine",
             "warmup_steps": 20,
@@ -97,7 +97,7 @@
         "ast_val_decode_chunk": 1,
         "group_size": 4,
         "clip_eps": 0.2,
-        "kl_coef": 0.05,
+        "kl_coef": 0.0,
         "alpha": 0.5,
         "comet_model_path": "pretrained_models/wmt22-comet-da/checkpoints/model.ckpt",
         "comet_gpus": 1,
