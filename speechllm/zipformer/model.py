@@ -20,7 +20,7 @@ from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
-from icefall.utils import make_pad_mask
+from speechllm.icefall.utils import make_pad_mask
 
 class EncoderModel(nn.Module):
     def __init__(

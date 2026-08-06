@@ -1,6 +1,7 @@
 #!/bin/bash
 
 cd /pfs/asr/guokezhen/ZipformerLLM
+ROOT_DIR=$(pwd)
 
 source /pfs/asr/miniconda3/etc/profile.d/conda.sh
 conda activate zipformer_vllm
@@ -46,8 +47,7 @@ IFS=',' read -ra TRAIN_GPU_ARRAY <<< "${TRAIN_GPUS}"
 NUM_VLLM=${#VLLM_GPU_ARRAY[@]}
 NUM_TRAIN=${#TRAIN_GPU_ARRAY[@]}
 
-export PYTHONPATH=/pfs/asr/guokezhen/ZipformerLLM:$PYTHONPATH
-export PYTHONPATH=/pfs/asr/icefall:$PYTHONPATH
+export PYTHONPATH=${ROOT_DIR}:$PYTHONPATH
 
 # ============================================================
 # 第 1 步：启动 Ray head（使用 4 张 GPU）

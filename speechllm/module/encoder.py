@@ -8,7 +8,7 @@ from speechllm.zipformer.model import EncoderModel
 from speechllm.zipformer.zipformer import Zipformer2
 from speechllm.zipformer.subsampling import Conv2dSubsampling
 from speechllm.zipformer.scaling import ScheduledFloat
-from icefall.utils import AttributeDict
+from speechllm.icefall.utils import AttributeDict
 
 def _to_int_tuple(s):
     if isinstance(s, int):
