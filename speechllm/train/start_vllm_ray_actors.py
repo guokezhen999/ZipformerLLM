@@ -7,8 +7,9 @@
         --gpu-ids 0,1 \
         --ray-address auto
 
-每个 actor 以 Ray detached actor 形式注册，名称为 "{actor_name_prefix}_{i}"，
-生命周期与本进程绑定——进程退出时 actor 随之销毁。
+每个 actor 以 Ray detached actor 形式注册，名称为 "{actor_name_prefix}_{i}"。
+注意：detached actor 不会随本进程退出自动销毁，退出前必须 ray.kill；
+脚本收到 SIGTERM/SIGINT 时会显式销毁全部 actor 以释放显存。
 """
 
 import argparse
@@ -69,7 +70,7 @@ def main():
         logging.info(f"正在启动 actor '{name}'（GPU {gpu_id}）...")
         actor = VLLMEmbedActor.options(
             name=name,
-            lifetime="detached",  # 生命周期与本进程绑定
+            lifetime="detached",  # 需显式 ray.kill；见下方 _kill_actors
             num_gpus=1,
         ).remote(
             model_path=args.model_path,
@@ -104,20 +105,31 @@ def main():
         "，".join(f"{name}(GPU {gpu_ids[i]})" for i, (name, _) in enumerate(actors))
     )
 
+    def _kill_actors():
+        """detached actor 不会随 driver 退出自动销毁，必须显式 ray.kill 才能释放显存。"""
+        for name, actor in actors:
+            try:
+                ray.kill(actor, no_restart=True)
+                logging.info(f"  已销毁 actor '{name}'")
+            except Exception as e:
+                logging.warning(f"  销毁 actor '{name}' 失败: {e}")
+
     # 保持进程存活，直到收到 SIGTERM / SIGINT
     stop = [False]
 
     def _handle_signal(signum, frame):
-        logging.info(f"收到信号 {signum}，正在退出...")
+        logging.info(f"收到信号 {signum}，正在销毁 vLLM actors...")
         stop[0] = True
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    while not stop[0]:
-        time.sleep(2)
-
-    logging.info("start_vllm_ray_actors 退出，actor 随进程组一同销毁。")
+    try:
+        while not stop[0]:
+            time.sleep(2)
+    finally:
+        _kill_actors()
+        logging.info("start_vllm_ray_actors 退出。")
 
 
 if __name__ == "__main__":

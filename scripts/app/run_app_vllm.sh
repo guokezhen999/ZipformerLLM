@@ -17,10 +17,6 @@
 # Usage:
 #   bash scripts/app/run_app_vllm.sh
 
-set -euo pipefail
-ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "${ROOT_DIR}"
-
 source /pfs/asr/miniconda3/etc/profile.d/conda.sh
 conda activate zipformer_vllm
 
@@ -32,7 +28,7 @@ export OMP_NUM_THREADS=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export RAY_IGNORE_VERSION_MISMATCH=1
 
-export PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="$(pwd)${PYTHONPATH:+:${PYTHONPATH}}"
 
 mkdir -p logs
 DATETIME=$(date +%Y%m%d_%H_%M)
@@ -122,17 +118,86 @@ echo "vLLM model     : ${VLLM_MODEL_PATH}"
 echo "App            : http://${APP_HOST}:${APP_PORT}"
 echo "Max clients    : ${SPEECHLLM_MAX_CONNECTIONS}"
 
+_CLEANING_UP=0
+
+_kill_pid_tree() {
+    local pid="${1:-}"
+    [[ -z "${pid}" ]] && return 0
+    local kids
+    kids="$(pgrep -P "${pid}" 2>/dev/null || true)"
+    local c
+    for c in ${kids}; do
+        _kill_pid_tree "${c}"
+    done
+    kill -TERM "${pid}" 2>/dev/null || true
+}
+
+_force_kill_pid_tree() {
+    local pid="${1:-}"
+    [[ -z "${pid}" ]] && return 0
+    local kids
+    kids="$(pgrep -P "${pid}" 2>/dev/null || true)"
+    local c
+    for c in ${kids}; do
+        _force_kill_pid_tree "${c}"
+    done
+    kill -KILL "${pid}" 2>/dev/null || true
+}
+
 cleanup() {
+    # Ctrl+C 会先触发 INT 再触发 EXIT；避免重复清理
+    if [[ "${_CLEANING_UP}" -eq 1 ]]; then
+        return 0
+    fi
+    _CLEANING_UP=1
+    trap - EXIT INT TERM
     echo "Cleaning up..."
+
+    # 1) 先显式销毁 named detached actors（否则仅杀 launcher 不会释放 vLLM 显存）
+    if [[ -n "${NUM_VLLM:-}" && -n "${ACTOR_NAME_PREFIX:-}" ]]; then
+        ${VLLM_PYTHON} - <<PYEOF || true
+import ray
+try:
+    ray.init(address="auto", ignore_reinit_error=True, namespace="speechllm_vllm")
+except Exception as e:
+    print(f"ray.init skip: {e}")
+    raise SystemExit(0)
+for i in range(int("${NUM_VLLM}")):
+    name = f"${ACTOR_NAME_PREFIX}_{i}"
+    try:
+        actor = ray.get_actor(name, namespace="speechllm_vllm")
+        ray.kill(actor, no_restart=True)
+        print(f"killed actor {name}")
+    except Exception as e:
+        print(f"skip actor {name}: {e}")
+try:
+    ray.shutdown()
+except Exception:
+    pass
+PYEOF
+    fi
+
+    # 2) 停 uvicorn / actor launcher（含子进程）
     if [[ -n "${UVICORN_PID:-}" ]]; then
-        kill "${UVICORN_PID}" 2>/dev/null || true
+        _kill_pid_tree "${UVICORN_PID}"
+    fi
+    if [[ -n "${ACTOR_LAUNCHER_PID:-}" ]]; then
+        _kill_pid_tree "${ACTOR_LAUNCHER_PID}"
+    fi
+    sleep 2
+    if [[ -n "${UVICORN_PID:-}" ]]; then
+        _force_kill_pid_tree "${UVICORN_PID}"
         wait "${UVICORN_PID}" 2>/dev/null || true
     fi
     if [[ -n "${ACTOR_LAUNCHER_PID:-}" ]]; then
-        kill "${ACTOR_LAUNCHER_PID}" 2>/dev/null || true
+        _force_kill_pid_tree "${ACTOR_LAUNCHER_PID}"
         wait "${ACTOR_LAUNCHER_PID}" 2>/dev/null || true
     fi
+
+    # 3) 停 Ray 集群，回收 worker 显存
     ray stop --force 2>/dev/null || true
+    sleep 2
+
     echo "Done."
 }
 trap cleanup EXIT INT TERM

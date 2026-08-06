@@ -7,10 +7,6 @@
 #   bash scripts/app/export_llm.sh
 #   CKPT=... BASE_MODEL=... OUTPUT=... bash scripts/app/export_llm.sh
 
-set -euo pipefail
-ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "${ROOT_DIR}"
-
 source /pfs/asr/miniconda3/etc/profile.d/conda.sh
 conda activate zipformer_vllm
 
