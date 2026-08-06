@@ -31,8 +31,8 @@ def get_args():
     parser.add_argument('--gpu_ids', type=str, default=None, help='指定的 GPU ID 列表 (逗号分隔，如 "0,1,2")')
     parser.add_argument('--max_new_tokens', type=int, default=200, help='生成的最大 token 数量')
     parser.add_argument('--num_chunks', type=int, default=1, help='解码等待的 encoder 的 chunk 数量')
-    parser.add_argument('--punct_kv_mode', type=int, default=0, choices=[0, 1, 2],
-                        help='遇到终结标点时的 KV Cache 处理策略: 0=不处理, 1=仅移除末尾标点的KV(默认), 2=清除除Prompt外的所有KV')
+    parser.add_argument('--punct_kv_mode', type=int, default=0, choices=[0, 1, 2, 3],
+                        help='标点策略: 0=不处理, 1=移除末尾标点KV, 2=清除Prompt外KV, 3=suppress,.?!')
     parser.add_argument('--repetition_penalty', type=float, default=1.0, help='重复惩罚系数，>1.0 时抑制重复 (如 1.2)')
     return parser.parse_args()
 

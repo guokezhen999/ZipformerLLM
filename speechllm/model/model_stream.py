@@ -1,5 +1,5 @@
 import torch
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 from .basic_model import SpeechLLM
 
 class SpeechLLMStream(SpeechLLM):
@@ -51,6 +51,36 @@ class SpeechLLMStream(SpeechLLM):
             return past_key_values[0][0].size(2)
         return 0
 
+    @staticmethod
+    def _token_core_text(decoded: str) -> str:
+        """去掉空白后的 token 文本。"""
+        return "".join(ch for ch in decoded if not ch.isspace())
+
+    def _collect_punct_token_ids(self, puncts: Set[str]) -> List[int]:
+        """收集 decode 后仅含指定标点（及可选空白）的 token id。"""
+        candidate_ids = set()
+        for punct in puncts:
+            for variant in (punct, f" {punct}"):
+                candidate_ids.update(
+                    self.llm_tokenizer.encode(variant, add_special_tokens=False)
+                )
+
+        filtered = []
+        for token_id in candidate_ids:
+            decoded = self.llm_tokenizer.decode([token_id])
+            core = self._token_core_text(decoded)
+            if core in puncts:
+                filtered.append(token_id)
+        return filtered
+
+    def _get_mode3_suppress_punct_ids(self) -> List[int]:
+        """mode 3: suppress , . ? ! 及中文对应标点。"""
+        if getattr(self, "_mode3_suppress_punct_ids", None) is not None:
+            return self._mode3_suppress_punct_ids
+        puncts = {",", ".", "?", "!", "，", "。", "？", "！"}
+        self._mode3_suppress_punct_ids = self._collect_punct_token_ids(puncts)
+        return self._mode3_suppress_punct_ids
+
     def generate(
         self,
         audio_embeds: torch.Tensor,
@@ -68,10 +98,11 @@ class SpeechLLMStream(SpeechLLM):
             prompts: List[str], 每个样本的初始 Prompt
             segments: List[List[Dict]], 每个样本包含一个切片列表。每个 Dict 为片段信息 {'start_idx': int, 'end_idx': int}
             generation_config: 生成配置参数 (如 beaming, sampling 等)
-            punct_kv_mode: 遇到终结标点时的 KV Cache 处理策略
+            punct_kv_mode: 标点处理策略
                 0 - 不做任何处理
                 1 - 仅移除末尾标点的 KV Cache (默认)
                 2 - 清除除 Prompt 之外的所有 KV Cache
+                3 - 解码时 suppress ,.?!(，。？！)
         Returns:
             List[List[str]]: 每个样本每个片段生成的文本列表
         """
@@ -98,6 +129,11 @@ class SpeechLLMStream(SpeechLLM):
         batch_size = audio_embeds.size(0)
         dtype = audio_embeds.dtype
         device = self.device
+        suppress_punct_ids = None
+        if punct_kv_mode == 3:
+            suppress_punct_ids = torch.tensor(
+                self._get_mode3_suppress_punct_ids(), device=device, dtype=torch.long
+            )
 
         # 2. 准备特殊 Token Embeddings (保持为 2D 形状 [1, D])
         if self.use_lora:
@@ -170,13 +206,15 @@ class SpeechLLMStream(SpeechLLM):
                     # 2. 获取预测的下一个 token 的 Logits (Shape: [Batch, Vocab_Size])
                     next_token_logits = outputs.logits[:, -1, :]
 
-                    # 3. 应用重复惩罚后贪心解码
+                    # 3. 应用重复惩罚 / 标点策略后贪心解码
                     repetition_penalty = generation_config.get("repetition_penalty", 1.0)
                     if repetition_penalty != 1.0 and len(generated_ids) > 0:
                         prev_ids = torch.tensor(generated_ids, device=device)
                         score = next_token_logits[0].index_select(0, prev_ids)
                         score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
                         next_token_logits[0].scatter_(0, prev_ids, score)
+                    if suppress_punct_ids is not None and suppress_punct_ids.numel() > 0:
+                        next_token_logits[0, suppress_punct_ids] = float("-inf")
                     max_logit_val, max_token_id_tensor = torch.max(next_token_logits, dim=-1)
                     token_id_int = max_token_id_tensor.item()
 
@@ -184,7 +222,7 @@ class SpeechLLMStream(SpeechLLM):
                     # 4. 遇到终止符 <W> 则拦截并清理记忆
                     # ==============================================================
                     if token_id_int == self.token_W_id:
-                        if punct_kv_mode != 0 and len(generated_ids) > 0:
+                        if punct_kv_mode in (1, 2) and len(generated_ids) > 0:
                             prev_char = self.llm_tokenizer.decode([generated_ids[-1]]).strip()
                             is_end_punct = prev_char and prev_char[-1] in ["。", "？", "！", ".", "?", "!"]
 

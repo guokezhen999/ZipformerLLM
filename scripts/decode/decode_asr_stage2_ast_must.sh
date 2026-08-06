@@ -20,7 +20,7 @@ checkpoints=(
 num_chunks=(1 2 4)
 
 # --- 要遍历的 punct_kv_mode 列表 ---
-punct_kv_modes=(1 2)
+punct_kv_modes=(3)
 
 # --- 要遍历的测试集 (名称 输入路径) ---
 declare -A INPUT_FILES

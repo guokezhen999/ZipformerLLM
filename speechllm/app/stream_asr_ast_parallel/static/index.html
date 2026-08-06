@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream ASR + AST Parallel by ZipformerLLM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+
+<body>
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="app-container">
+
+        <!-- Header -->
+        <header class="glass-panel">
+            <div class="header-content">
+                <div class="logo-box">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2v6c0 1.657-1.343 3-3 3H3M12 2v6c0 1.657 1.343 3 3 3h6M12 2v10m-6 5c1.105 0 2-3.134 2-7s-.895-7-2-7-2 3.134-2 7 .895 7 2 7zm12 0c1.105 0 2-3.134 2-7s-.895-7-2-7-2 3.134-2 7 .895 7 2 7z"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M12 2A2 2 0 1012 6 2 2 0 0012 2z" fill="currentColor" />
+                    </svg>
+                    <h1>ZipformerLLM <span class="badge">Parallel</span></h1>
+                </div>
+
+                <div class="controls">
+                    <div class="control-group">
+                        <label for="asrLangSelect">ASR Language</label>
+                        <select id="asrLangSelect" class="custom-select">
+                            __ASR_LANG_OPTIONS__
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="langSelect">AST Target Language</label>
+                        <select id="langSelect" class="custom-select">
+                            __AST_LANG_OPTIONS__
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Display: dual panel -->
+        <main class="main-display glass-panel">
+            <div class="dual-panel">
+                <!-- ASR Panel -->
+                <div class="panel" id="asrPanel">
+                    <div class="panel-header">
+                        <span class="panel-badge asr-badge">ASR</span>
+                        <span class="panel-title">Transcription</span>
+                        <select id="asrChunkSelect" class="custom-select chunk-select">
+                            <option value="1" selected>1 Chunk</option>
+                            <option value="2">2 Chunks</option>
+                            <option value="4">4 Chunks</option>
+                        </select>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="enableASR" checked>
+                            <span class="toggle-chip asr-chip">ON</span>
+                        </label>
+                    </div>
+                    <div class="status-indicator">
+                        <div id="asrDot" class="dot"></div>
+                        <span id="asrStatus">Ready</span>
+                    </div>
+                    <div class="text-display" id="asrDisplay">
+                        <p id="asrFinalText" class="final-text"></p>
+                        <p id="asrPartialText" class="partial-text"></p>
+                    </div>
+                </div>
+
+                <div class="panel-divider"></div>
+
+                <!-- AST Panel -->
+                <div class="panel" id="astPanel">
+                    <div class="panel-header">
+                        <span class="panel-badge ast-badge">AST</span>
+                        <span class="panel-title">Translation</span>
+                        <select id="astChunkSelect" class="custom-select chunk-select">
+                            <option value="1" selected>1 Chunk</option>
+                            <option value="2">2 Chunks</option>
+                            <option value="4">4 Chunks</option>
+                        </select>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="enableAST" checked>
+                            <span class="toggle-chip ast-chip">ON</span>
+                        </label>
+                    </div>
+                    <div class="status-indicator">
+                        <div id="astDot" class="dot"></div>
+                        <span id="astStatus">Ready</span>
+                    </div>
+                    <div class="text-display" id="astDisplay">
+                        <p id="astFinalText" class="final-text"></p>
+                        <p id="astPartialText" class="partial-text"></p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Record Action -->
+        <footer class="action-footer">
+            <button id="clearBtn" class="clear-btn" title="Clear text">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+            </button>
+            <button id="recordBtn" class="record-btn">
+                <div class="btn-rings">
+                    <div class="ring ring-inner"></div>
+                    <div class="ring ring-outer"></div>
+                </div>
+                <div class="mic-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                        <line x1="8" y1="22" x2="16" y2="22"></line>
+                    </svg>
+                </div>
+            </button>
+        </footer>
+    </div>
+
+    <script src="/static/script.js?v=2"></script>
+</body>
+
+</html>
