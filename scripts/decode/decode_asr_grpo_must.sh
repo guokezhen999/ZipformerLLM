@@ -7,20 +7,20 @@ conda activate speechllm
 
 # --- 参数配置区 ---
 chunk=32
-CONFIG=conf/grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000.json
+CONFIG=conf/grpo_vllm_kl_0.05_lr_1e-6_comet_no_kl_step_2000.json
 MAX_NEW_TOKENS=200
 TARGET_LANG="English"
 
 # --- 要遍历的检查点文件名列表 (可包含 epoch 或 step 格式) ---
 checkpoints=(
-    "best-step-1850-weights.pt"
+    "best-step-step=1950.pt"
 )
 
 # --- 要遍历的 num_chunk 列表 ---
 num_chunks=(1 2 4)
 
 # --- 要遍历的 punct_kv_mode 列表 ---
-punct_kv_modes=(0 3)
+punct_kv_modes=(3)
 
 # --- 要遍历的测试集 (名称 输入路径) ---
 declare -A INPUT_FILES
@@ -31,8 +31,8 @@ ulimit -n 65536
 
 for ckpt_name in "${checkpoints[@]}"; do
     tag="${ckpt_name%.pt}"
-    DECODE_DIR=exp/grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000/decode_asr_must/${tag}
-    CHECKPOINT="exp/grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000/checkpoints/${ckpt_name}"
+    DECODE_DIR=exp/grpo_vllm_kl_0.05_lr_1e-6_comet_no_kl_step_2000/decode_asr_must/${tag}
+    CHECKPOINT="exp/grpo_vllm_kl_0.05_lr_1e-6_comet_no_kl_step_2000/checkpoints/${ckpt_name}"
 
     mkdir -p $DECODE_DIR
 

@@ -36,7 +36,9 @@ DEFAULT_DIRS = [
 
 REPORT_NAME = "emission_latency_write_report.txt"
 
-DATASET_RE = re.compile(r"(MuST-COMMON|MuST-HE)", re.IGNORECASE)
+DATASET_RE = re.compile(
+    r"(MuST[-_]COMMON|MuST[-_]HE|must_common|must_he)", re.IGNORECASE
+)
 CHUNK_RE = re.compile(r"chunk_(\d+)", re.IGNORECASE)
 
 
@@ -55,7 +57,7 @@ def parse_meta(name: str) -> tuple[str | None, str | None]:
     ch_m = CHUNK_RE.search(name)
     dataset = None
     if ds_m:
-        raw = ds_m.group(1).upper()
+        raw = ds_m.group(1).upper().replace("-", "_")
         dataset = "MuST-COMMON" if "COMMON" in raw else "MuST-HE"
     chunk = f"chunk_{ch_m.group(1)}" if ch_m else None
     return dataset, chunk
