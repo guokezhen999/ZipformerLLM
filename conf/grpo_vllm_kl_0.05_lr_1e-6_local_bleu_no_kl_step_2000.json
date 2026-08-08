@@ -72,7 +72,7 @@
     },
     "train": {
         "exp_dir": "exp",
-        "exp_name": "grpo_vllm_kl_0.05_lr_1e-6_local_bleu_step_2000",
+        "exp_name": "grpo_vllm_kl_0.05_lr_1e-6_local_bleu_no_kl_step_2000",
         "checkpoint_dir_name": "checkpoints",
         "seed": 42,
         "gpus": 4,
@@ -97,7 +97,7 @@
         "ast_val_decode_chunk": 1,
         "group_size": 4,
         "clip_eps": 0.2,
-        "kl_coef": 0.05,
+        "kl_coef": 0.0,
         "alpha": 0.0,
         "temperature": 0.8,
         "top_p": 0.95,

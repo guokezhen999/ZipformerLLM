@@ -30,12 +30,12 @@ echo "Logs: main=${MAIN_LOG}, actor=${ACTOR_LOG}, train=${TRAIN_LOG}"
 # ============================================================
 # 配置
 # ============================================================
-CONFIG="conf/grpo_vllm_kl_0.05_lr_1e-6_local_bleu_step_2000.json"
+CONFIG="conf/grpo_vllm_kl_0.05_lr_1e-6_local_bleu_no_kl_step_2000.json"
 SFT_CKPT="pretrained_models/stage2/epoch-epoch=14-step-step=194787/epoch-epoch=14-step-step=194787.pt"
 VLLM_MODEL_PATH="pretrained_models/stage2/epoch-epoch=14-step-step=194787/llm_epoch-epoch=14-step-step=194787"
 VLLM_WEIGHT_SYNC_PATH="/dev/shm/vllm_sync_weights"
 
-# vLLM 推理 GPU 和训练 GPU（4卡，每张卡同时负责推理和训练；纯 local BLEU，不加载 COMET）
+# vLLM 推理 GPU 和训练 GPU（4卡；纯 local BLEU，不加载 COMET；无 KL）
 VLLM_GPUS="0,1,2,3"
 TRAIN_GPUS="0,1,2,3"
 
