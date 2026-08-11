@@ -41,8 +41,8 @@ echo "Logs: main=${MAIN_LOG}, actor=${ACTOR_LOG}"
 # Model / server config
 # ============================================================
 export SPEECHLLM_CONFIG="${SPEECHLLM_CONFIG:-conf/deploy_model.json}"
-export SPEECHLLM_CHECKPOINT="${SPEECHLLM_CHECKPOINT:-exp/grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000/checkpoints/best-step-1850-weights.pt}"
-export SPEECHLLM_LLM_PATH="${SPEECHLLM_LLM_PATH:-pretrained_models/grpo_vllm_kl_0.05_lr_1e-6_comet_step_2000_llm}"
+export SPEECHLLM_CHECKPOINT="${SPEECHLLM_CHECKPOINT:-exp/grpo_vllm_kl_0.05_lr_1e-6_comet_no_kl_step_2000/checkpoints/best-step-step=1950.pt}"
+export SPEECHLLM_LLM_PATH="${SPEECHLLM_LLM_PATH:-pretrained_models/grpo_vllm_kl_0.05_lr_1e-6_comet_no_kl_step_2000_llm}"
 export SPEECHLLM_DEVICE="${SPEECHLLM_DEVICE:-cuda:0}"
 export SPEECHLLM_OFFLOAD_LLM="${SPEECHLLM_OFFLOAD_LLM:-1}"
 
