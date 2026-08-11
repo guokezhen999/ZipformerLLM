@@ -26,6 +26,7 @@ envs/
 
 # Experiment outputs & models (large / local paths)
 exp
+export/
 pretrained_models
 logs/
 cache/
