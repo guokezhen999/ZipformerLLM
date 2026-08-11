@@ -16,11 +16,43 @@ class StreamProcessRewarder:
         self.comet_gpus = comet_gpus  # 0=CPU, 1=GPU; wmt22-comet-da 约需 2-4GB 显存
         self._comet_model = None
 
+    @staticmethod
+    def _patch_comet_xlmr_for_transformers5():
+        """transformers>=4.5x 下 XLM-R return_dict=False 只返回 2 项，
+        而 unbabel-comet 仍按 (last_hidden, pooler, hidden_states) 解包，
+        会触发 ValueError: expected 3, got 2，导致 COMET 分数全 0。
+        """
+        from comet.encoders.xlmr import XLMREncoder
+
+        if getattr(XLMREncoder, "_speechllm_tf5_patch", False):
+            return
+
+        def forward(self, input_ids, attention_mask, **kwargs):
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            last_hidden_states = outputs.last_hidden_state
+            all_layers = outputs.hidden_states
+            return {
+                "sentemb": last_hidden_states[:, 0, :],
+                "wordemb": last_hidden_states,
+                "all_layers": all_layers,
+                "attention_mask": attention_mask,
+            }
+
+        XLMREncoder.forward = forward
+        XLMREncoder._speechllm_tf5_patch = True
+        logging.info("[COMET] patched XLMREncoder.forward for transformers return_dict compatibility")
+
     def _load_comet_model(self):
         """Lazy-load COMET model from checkpoint."""
         if self._comet_model is not None:
             return
         from comet import load_from_checkpoint
+        self._patch_comet_xlmr_for_transformers5()
         self._comet_model = load_from_checkpoint(
             self.comet_model_path, reload_hparams=True, local_files_only=True
         )
