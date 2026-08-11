@@ -28,13 +28,13 @@ envs/
 exp
 export/
 pretrained_models
-logs/
+logs
 cache/
 slurm/
 sample/
 
 # Data (audio features, shar shards, cuts; often symlinked)
-data/
+data
 cuts/
 
 # Checkpoints & tensors
